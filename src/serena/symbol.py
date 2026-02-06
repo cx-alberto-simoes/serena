@@ -747,7 +747,11 @@ class JetBrainsSymbol(Symbol):
     def get_file_content(self) -> str:
         if self._cached_file_content is None:
             path = os.path.join(self._project.project_root, self.get_relative_path())
-            with open(path, encoding=self._project.project_config.encoding) as f:
+            # Use utf-8-sig to automatically strip UTF-8 BOM if present
+            encoding = (
+                "utf-8-sig" if self._project.project_config.encoding.lower() in ("utf-8", "utf8") else self._project.project_config.encoding
+            )
+            with open(path, encoding=encoding) as f:
                 self._cached_file_content = f.read()
         return self._cached_file_content
 

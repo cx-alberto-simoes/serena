@@ -184,7 +184,9 @@ class FileUtils:
             raise FileNotFoundError(f"File read '{file_path}' failed: File does not exist.")
         try:
             try:
-                with open(file_path, encoding=encoding) as inp_file:
+                # Use utf-8-sig to automatically strip UTF-8 BOM if present
+                encoding_for_open = "utf-8-sig" if encoding.lower() in ("utf-8", "utf8") else encoding
+                with open(file_path, encoding=encoding_for_open) as inp_file:
                     return inp_file.read()
             except UnicodeDecodeError as ude:
                 results = charset_normalizer.from_path(file_path)

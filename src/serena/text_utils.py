@@ -10,8 +10,6 @@ from typing import Any, Self
 from bs4 import BeautifulSoup
 from joblib import Parallel, delayed
 
-from serena.constants import DEFAULT_SOURCE_FILE_ENCODING
-
 log = logging.getLogger(__name__)
 
 
@@ -99,7 +97,7 @@ class MatchedConsecutiveLines:
     def from_file_contents(
         cls, file_contents: str, line: int, context_lines_before: int = 0, context_lines_after: int = 0, source_file_path: str | None = None
     ) -> Self:
-        line_contents = file_contents.split("\n")
+        line_contents = file_contents.splitlines()
         start_lineno = max(0, line - context_lines_before)
         end_lineno = min(len(line_contents) - 1, line + context_lines_after)
         text_lines: list[TextLine] = []
@@ -165,7 +163,8 @@ def search_text(
 
     """
     if source_file_path and content is None:
-        with open(source_file_path) as f:
+        # Use utf-8-sig to automatically strip UTF-8 BOM if present
+        with open(source_file_path, encoding="utf-8-sig") as f:
             content = f.read()
 
     if content is None:
@@ -240,7 +239,8 @@ def search_text(
 
 def default_file_reader(file_path: str) -> str:
     """Reads using the default encoding."""
-    with open(file_path, encoding=DEFAULT_SOURCE_FILE_ENCODING) as f:
+    # Use utf-8-sig to automatically strip UTF-8 BOM if present
+    with open(file_path, encoding="utf-8-sig") as f:
         return f.read()
 
 
