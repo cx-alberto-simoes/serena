@@ -97,7 +97,7 @@ class MatchedConsecutiveLines:
     def from_file_contents(
         cls, file_contents: str, line: int, context_lines_before: int = 0, context_lines_after: int = 0, source_file_path: str | None = None
     ) -> Self:
-        line_contents = file_contents.split("\n")
+        line_contents = file_contents.splitlines()
         start_lineno = max(0, line - context_lines_before)
         end_lineno = min(len(line_contents) - 1, line + context_lines_after)
         text_lines: list[TextLine] = []
