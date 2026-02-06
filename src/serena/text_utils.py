@@ -10,8 +10,6 @@ from typing import Any, Self
 from bs4 import BeautifulSoup
 from joblib import Parallel, delayed
 
-from serena.constants import DEFAULT_SOURCE_FILE_ENCODING
-
 log = logging.getLogger(__name__)
 
 
@@ -165,7 +163,8 @@ def search_text(
 
     """
     if source_file_path and content is None:
-        with open(source_file_path) as f:
+        # Use utf-8-sig to automatically strip UTF-8 BOM if present
+        with open(source_file_path, encoding="utf-8-sig") as f:
             content = f.read()
 
     if content is None:
@@ -240,7 +239,8 @@ def search_text(
 
 def default_file_reader(file_path: str) -> str:
     """Reads using the default encoding."""
-    with open(file_path, encoding=DEFAULT_SOURCE_FILE_ENCODING) as f:
+    # Use utf-8-sig to automatically strip UTF-8 BOM if present
+    with open(file_path, encoding="utf-8-sig") as f:
         return f.read()
 
 

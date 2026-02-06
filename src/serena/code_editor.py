@@ -387,7 +387,9 @@ class JetBrainsCodeEditor(CodeEditor[JetBrainsSymbol]):
             super().__init__(relative_path)
             path = os.path.join(project.project_root, relative_path)
             log.info("Editing file: %s", path)
-            with open(path, encoding=project.project_config.encoding) as f:
+            # Use utf-8-sig to automatically strip UTF-8 BOM if present
+            encoding = "utf-8-sig" if project.project_config.encoding.lower() in ("utf-8", "utf8") else project.project_config.encoding
+            with open(path, encoding=encoding) as f:
                 self._content = f.read()
 
         def get_contents(self) -> str:
