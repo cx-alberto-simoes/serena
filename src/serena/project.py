@@ -3,13 +3,16 @@ import logging
 import os
 import threading
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pathspec
 from sensai.util.logging import LogTime
 from sensai.util.string import ToStringMixin
 
 from serena.config.serena_config import DEFAULT_TOOL_TIMEOUT, ProjectConfig, get_serena_managed_in_project_dir
+
+if TYPE_CHECKING:
+    from serena.config.serena_config import SerenaConfig
 from serena.constants import SERENA_FILE_ENCODING, SERENA_MANAGED_DIR_NAME
 from serena.ls_manager import LanguageServerFactory, LanguageServerManager
 from serena.text_utils import MatchedConsecutiveLines, search_files
@@ -56,9 +59,16 @@ class MemoriesManager:
 
 
 class Project(ToStringMixin):
-    def __init__(self, project_root: str, project_config: ProjectConfig, is_newly_created: bool = False):
+    def __init__(
+        self,
+        project_root: str,
+        project_config: ProjectConfig,
+        is_newly_created: bool = False,
+        serena_config: "SerenaConfig | None" = None,
+    ):
         self.project_root = project_root
         self.project_config = project_config
+        self.serena_config = serena_config
         self.memories_manager = MemoriesManager(project_root)
         self.language_server_manager: LanguageServerManager | None = None
         self._is_newly_created = is_newly_created
@@ -76,6 +86,13 @@ class Project(ToStringMixin):
         self.__ignore_spec: pathspec.PathSpec
         self._ignore_spec_available = threading.Event()
         threading.Thread(name=f"gather-ignorespec[{self.project_config.project_name}]", target=self._gather_ignorespec, daemon=True).start()
+
+    @property
+    def extra_source_file_extensions(self) -> list[str]:
+        """Get extra source file extensions from global config, or empty list if not available."""
+        if self.serena_config is not None:
+            return self.serena_config.extra_source_file_extensions
+        return []
 
     def _gather_ignorespec(self) -> None:
         with LogTime(f"Gathering ignore spec for project {self.project_config.project_name}", logger=log):
@@ -115,12 +132,12 @@ class Project(ToStringMixin):
         return self.project_config.project_name
 
     @classmethod
-    def load(cls, project_root: str | Path, autogenerate: bool = True) -> "Project":
+    def load(cls, project_root: str | Path, autogenerate: bool = True, serena_config: "SerenaConfig | None" = None) -> "Project":
         project_root = Path(project_root).resolve()
         if not project_root.exists():
             raise FileNotFoundError(f"Project root not found: {project_root}")
         project_config = ProjectConfig.load(project_root, autogenerate=autogenerate)
-        return Project(project_root=str(project_root), project_config=project_config)
+        return Project(project_root=str(project_root), project_config=project_config, serena_config=serena_config)
 
     def save_config(self) -> None:
         """
@@ -142,8 +159,22 @@ class Project(ToStringMixin):
             msg = f"Created and activated a new project with name '{self.project_name}' at {self.project_root}. "
         else:
             msg = f"The project with name '{self.project_name}' at {self.project_root} is activated."
-        languages_str = ", ".join([lang.value for lang in self.project_config.languages])
-        msg += f"\nProgramming languages: {languages_str}; file encoding: {self.project_config.encoding}"
+
+        # Handle empty languages list
+        if self.project_config.languages:
+            languages_str = ", ".join([lang.value for lang in self.project_config.languages])
+            msg += f"\nProgramming languages: {languages_str}; file encoding: {self.project_config.encoding}"
+            if self.extra_source_file_extensions:
+                msg += f"\nExtra source file extensions: {', '.join(self.extra_source_file_extensions)}"
+        else:
+            msg += (
+                f"\nNo language servers configured (file encoding: {self.project_config.encoding}). "
+                "File-based tools (read_file, list_dir, search_for_pattern, etc.) are available, "
+                "but symbolic tools (find_symbol, rename_symbol, etc.) are not available."
+            )
+            if self.extra_source_file_extensions:
+                msg += f"\nSource file extensions: {', '.join(self.extra_source_file_extensions)}"
+
         memories = self.memories_manager.list_memories()
         if memories:
             msg += (
@@ -212,11 +243,20 @@ class Project(ToStringMixin):
         is_file = os.path.isfile(abs_path)
         if is_file and ignore_non_source_files:
             is_file_in_supported_language = False
+
+            # Check configured languages
             for language in self.project_config.languages:
                 fn_matcher = language.get_source_fn_matcher()
                 if fn_matcher.is_relevant_filename(abs_path):
                     is_file_in_supported_language = True
                     break
+
+            # Check extra source file extensions from global config
+            if not is_file_in_supported_language and self.extra_source_file_extensions:
+                file_ext = os.path.splitext(abs_path)[1].lower()
+                if file_ext in self.extra_source_file_extensions:
+                    is_file_in_supported_language = True
+
             if not is_file_in_supported_language:
                 return True
 
@@ -394,7 +434,7 @@ class Project(ToStringMixin):
         ls_timeout: float | None = DEFAULT_TOOL_TIMEOUT - 5,
         trace_lsp_communication: bool = False,
         ls_specific_settings: dict[Language, Any] | None = None,
-    ) -> LanguageServerManager:
+    ) -> LanguageServerManager | None:
         """
         Creates the language server manager for the project, starting one language server per configured programming language.
 
@@ -403,13 +443,29 @@ class Project(ToStringMixin):
         :param trace_lsp_communication: whether to trace LSP communication
         :param ls_specific_settings: optional LS specific configuration of the language server,
             see docstrings in the inits of subclasses of SolidLanguageServer to see what values may be passed.
-        :return: the language server manager, which is also stored in the project instance
+        :return: the language server manager (or None if no languages configured but extra_source_file_extensions is set),
+            which is also stored in the project instance
         """
         # if there is an existing instance, stop its language servers first
         if self.language_server_manager is not None:
             log.info("Stopping existing language server manager ...")
             self.language_server_manager.stop_all()
             self.language_server_manager = None
+
+        # Handle empty languages list
+        if not self.project_config.languages:
+            if self.extra_source_file_extensions:
+                log.info(
+                    f"No language servers configured for {self.project_root}, "
+                    f"but extra_source_file_extensions is set: {self.extra_source_file_extensions}"
+                )
+                self.language_server_manager = None
+                return None
+            else:
+                raise ValueError(
+                    f"Project at {self.project_root} has no languages configured. "
+                    f"To use file-based tools without language servers, set extra_source_file_extensions in serena_config.yml"
+                )
 
         log.info(f"Creating language server manager for {self.project_root}")
         factory = LanguageServerFactory(

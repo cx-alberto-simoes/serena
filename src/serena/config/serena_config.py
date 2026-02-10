@@ -221,7 +221,9 @@ class ProjectConfig(ToolInclusionDefinition, ModeSelectionDefinition, ToStringMi
                         f"To use Serena with this project, you need to either\n"
                         f"  1. specify a programming language by adding parameters --language <language>\n"
                         f"     when creating the project via the Serena CLI command OR\n"
-                        f"  2. add source files in one of the supported languages first.\n\n"
+                        f"  2. add source files in one of the supported languages first OR\n"
+                        f"  3. set extra_source_file_extensions: ['.ext'] in your global serena_config.yml\n"
+                        f"     to use file-based tools without language servers.\n\n"
                         f"Supported languages are: {language_values}\n"
                         f"Read the documentation for more information."
                     )
@@ -232,7 +234,7 @@ class ProjectConfig(ToolInclusionDefinition, ModeSelectionDefinition, ToStringMi
                 # find the language with the highest percentage and enable it
                 top_language_pair = languages_and_percentages[0]
                 other_language_pairs = languages_and_percentages[1:]
-                languages_to_use: list[str] = [top_language_pair[0].value]
+                languages_to_use = [top_language_pair[0].value]
                 # if in interactive mode, ask the user which other languages to enable
                 if len(other_language_pairs) > 0 and interactive:
                     print(
@@ -350,6 +352,9 @@ class ProjectConfig(ToolInclusionDefinition, ModeSelectionDefinition, ToStringMi
     def load(cls, project_root: Path | str, autogenerate: bool = False) -> Self:
         """
         Load a ProjectConfig instance from the path to the project root.
+
+        :param project_root: the path to the project root
+        :param autogenerate: whether to autogenerate the project configuration if it does not exist
         """
         project_root = Path(project_root)
         yaml_path = project_root / cls.rel_path_to_project_yml()
@@ -397,16 +402,24 @@ class ProjectConfig(ToolInclusionDefinition, ModeSelectionDefinition, ToStringMi
 
 
 class RegisteredProject(ToStringMixin):
-    def __init__(self, project_root: str, project_config: "ProjectConfig", project_instance: Optional["Project"] = None) -> None:
+    def __init__(
+        self,
+        project_root: str,
+        project_config: "ProjectConfig",
+        project_instance: Optional["Project"] = None,
+        serena_config: Optional["SerenaConfig"] = None,
+    ) -> None:
         """
         Represents a registered project in the Serena configuration.
 
         :param project_root: the root directory of the project
         :param project_config: the configuration of the project
+        :param serena_config: the parent SerenaConfig instance
         """
         self.project_root = Path(project_root).resolve()
         self.project_config = project_config
         self._project_instance = project_instance
+        self._serena_config = serena_config
 
     def _tostring_exclude_private(self) -> bool:
         return True
@@ -421,6 +434,7 @@ class RegisteredProject(ToStringMixin):
             project_root=project_instance.project_root,
             project_config=project_instance.project_config,
             project_instance=project_instance,
+            serena_config=project_instance.serena_config,
         )
 
     @classmethod
@@ -448,7 +462,9 @@ class RegisteredProject(ToStringMixin):
             from ..project import Project
 
             with LogTime(f"Loading project instance for {self}", logger=log):
-                self._project_instance = Project(project_root=str(self.project_root), project_config=self.project_config)
+                self._project_instance = Project(
+                    project_root=str(self.project_root), project_config=self.project_config, serena_config=self._serena_config
+                )
         return self._project_instance
 
 
@@ -492,6 +508,15 @@ class SerenaConfig(ToolInclusionDefinition, ModeSelectionDefinition, ToStringMix
     """
     ls_specific_settings: dict = field(default_factory=dict)
     """Advanced configuration option allowing to configure language server implementation specific options, see SolidLSPSettings for more info."""
+
+    extra_source_file_extensions: list[str] = field(default_factory=list)
+    """
+    Additional file extensions to treat as source files, beyond those defined by configured languages.
+    Useful for:
+    - Projects with languages + additional file types (e.g., Python + SQL: extra_source_file_extensions: [".sql"])
+    - Projects without language servers (e.g., SQL-only: languages: [], extra_source_file_extensions: [".sql"])
+    Extensions should include the dot (e.g., ".sql", ".md")
+    """
 
     # settings with overridden defaults
     default_modes: Sequence[str] | None = ("interactive", "editing")
@@ -610,6 +635,7 @@ class SerenaConfig(ToolInclusionDefinition, ModeSelectionDefinition, ToStringMix
             project = RegisteredProject(
                 project_root=str(path),
                 project_config=project_config,
+                serena_config=instance,
             )
             instance.projects.append(project)
 
@@ -745,8 +771,9 @@ class SerenaConfig(ToolInclusionDefinition, ModeSelectionDefinition, ToStringMix
 
         project_config = ProjectConfig.load(project_root, autogenerate=True)
 
-        new_project = Project(project_root=str(project_root), project_config=project_config, is_newly_created=True)
-        self.add_registered_project(RegisteredProject.from_project_instance(new_project))
+        new_project = Project(project_root=str(project_root), project_config=project_config, is_newly_created=True, serena_config=self)
+        registered_project = RegisteredProject.from_project_instance(new_project)
+        self.add_registered_project(registered_project)
 
         return new_project
 
