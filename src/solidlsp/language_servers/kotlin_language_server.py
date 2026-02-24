@@ -19,6 +19,7 @@ Example configuration for large projects:
 import logging
 import os
 import pathlib
+import shutil
 import stat
 import threading
 from typing import cast
@@ -54,6 +55,8 @@ PLATFORM_KOTLIN_SUFFIX = {
 }
 
 # Java runtime dependency information per platform
+JAVA_VERSION=21
+
 JAVA_DEPENDENCIES = {
     "win-x64": {
         "url": "https://github.com/redhat-developer/vscode-java/releases/download/v1.42.0/java-win32-x64-1.42.0-561.vsix",
@@ -121,6 +124,88 @@ class KotlinLanguageServer(SolidLanguageServer):
             super().__init__(custom_settings, ls_resources_dir)
             self._java_home_path: str | None = None
 
+        def _check_java_version_in_path(self) -> bool:
+            """
+            Check if Java is available in PATH with the minimum required version.
+
+            Returns:
+                True if Java is available with version >= JAVA_VERSION, False otherwise.
+            """
+            import subprocess
+
+            try:
+                # Run 'java -version' to check if Java is available
+                result = subprocess.run(
+                    ["java", "-version"],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+
+                # Java outputs version to stderr
+                version_output = result.stderr
+
+                # Parse version from output like 'openjdk version "21.0.1"' or 'java version "1.8.0_202"'
+                import re
+                version_match = re.search(r'version\s+"(\d+)\.?(\d+)?', version_output)
+
+                if version_match:
+                    major_version = int(version_match.group(1))
+                    # Handle old Java version format (1.8.0 -> major version is 8)
+                    if major_version == 1 and version_match.group(2):
+                        major_version = int(version_match.group(2))
+
+                    if major_version >= JAVA_VERSION:
+                        log.info(f"Found Java {major_version} in PATH (required: {JAVA_VERSION})")
+                        return True
+                    else:
+                        log.info(f"Found Java {major_version} in PATH, but version {JAVA_VERSION} is required")
+                        return False
+                else:
+                    log.warning("Could not parse Java version from output")
+                    return False
+
+            except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError) as e:
+                log.debug(f"Java not found in PATH or failed to check version: {e}")
+                return False
+
+        def _setup_java_dependency(self, static_dir: str, platform_id) -> str:
+            """
+            Setup Java runtime dependency for Kotlin Language Server.
+            First checks if Java is available in PATH with minimum required version.
+            If not available, downloads and extracts the bundled Java runtime.
+
+            Args:
+                static_dir: Directory to store downloaded dependencies
+                platform_id: Platform identifier for selecting correct Java download
+
+            Returns:
+                Path to the Java executable
+            """
+            # First check if Java is available in PATH
+            if self._check_java_version_in_path():
+                log.info("Using Java from PATH")
+                # Return 'java' to use from PATH (JAVA_HOME will not be set)
+                return "java"
+
+            # Java not available or version too old - download bundled version
+            java_dependency = JAVA_DEPENDENCIES[platform_id.value]
+
+            java_dir = os.path.join(static_dir, "java")
+            os.makedirs(java_dir, exist_ok=True)
+
+            self._java_home_path = os.path.join(java_dir, java_dependency["java_home_path"])
+            java_path = os.path.join(java_dir, java_dependency["java_path"])
+
+            if not os.path.exists(java_path):
+                log.info(f"Downloading Java {JAVA_VERSION} for {platform_id.value}...")
+                FileUtils.download_and_extract_archive(java_dependency["url"], java_dir, java_dependency["archiveType"])
+                if not platform_id.value.startswith("win-"):
+                    os.chmod(java_path, 0o755)
+
+            assert os.path.exists(java_path), f"Java executable not found at {java_path}"
+            return java_path
+
         def _get_or_install_core_dependency(self) -> str:
             """
             Setup runtime dependencies for Kotlin Language Server and return the path to the executable script.
@@ -135,32 +220,20 @@ class KotlinLanguageServer(SolidLanguageServer):
             kotlin_suffix = PLATFORM_KOTLIN_SUFFIX.get(platform_id.value)
             assert kotlin_suffix, f"Unsupported platform for Kotlin LSP: {platform_id.value}"
 
-            java_dependency = JAVA_DEPENDENCIES[platform_id.value]
-
             # Setup paths for dependencies
             static_dir = os.path.join(self._ls_resources_dir, "kotlin_language_server")
             os.makedirs(static_dir, exist_ok=True)
 
-            # Setup Java
-            java_dir = os.path.join(static_dir, "java")
-            os.makedirs(java_dir, exist_ok=True)
-
-            self._java_home_path = os.path.join(java_dir, java_dependency["java_home_path"])
-            java_path = os.path.join(java_dir, java_dependency["java_path"])
-
-            if not os.path.exists(java_path):
-                log.info(f"Downloading Java for {platform_id.value}...")
-                FileUtils.download_and_extract_archive(java_dependency["url"], java_dir, java_dependency["archiveType"])
-                if not platform_id.value.startswith("win-"):
-                    os.chmod(java_path, 0o755)
-
-            assert os.path.exists(java_path), f"Java executable not found at {java_path}"
+            # Setup Java (checks PATH first, then downloads if needed)
+            _java_path = self._setup_java_dependency(static_dir, platform_id)
 
             # Setup Kotlin Language Server
-            if platform_id.value.startswith("win-"):
-                kotlin_script = os.path.join(static_dir, "kotlin-lsp.cmd")
-            else:
-                kotlin_script = os.path.join(static_dir, "kotlin-lsp.sh")
+            kotlin_script_name = "kotlin-lsp.cmd" if platform_id.value.startswith("win-") else "kotlin-lsp.sh"
+
+            if shutil.which(kotlin_script_name):
+                return kotlin_script_name
+
+            kotlin_script = os.path.join(static_dir, kotlin_script_name)
 
             if not os.path.exists(kotlin_script):
                 kotlin_lsp_version = self._custom_settings.get("kotlin_lsp_version", DEFAULT_KOTLIN_LSP_VERSION)
@@ -187,6 +260,7 @@ class KotlinLanguageServer(SolidLanguageServer):
             """Provides JAVA_HOME and JVM options for the Kotlin Language Server process."""
             env: dict[str, str] = {}
 
+            # Only set JAVA_HOME if using bundled Java (not from PATH)
             if self._java_home_path is not None:
                 env["JAVA_HOME"] = self._java_home_path
 
