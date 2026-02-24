@@ -19,8 +19,10 @@ Example configuration for large projects:
 import logging
 import os
 import pathlib
+import re
 import shutil
 import stat
+import subprocess
 import threading
 from typing import cast
 
@@ -55,7 +57,7 @@ PLATFORM_KOTLIN_SUFFIX = {
 }
 
 # Java runtime dependency information per platform
-JAVA_VERSION=21
+MIN_JAVA_VERSION=21
 
 JAVA_DEPENDENCIES = {
     "win-x64": {
@@ -131,8 +133,6 @@ class KotlinLanguageServer(SolidLanguageServer):
             Returns:
                 True if Java is available with version >= JAVA_VERSION, False otherwise.
             """
-            import subprocess
-
             try:
                 # Run 'java -version' to check if Java is available
                 result = subprocess.run(
@@ -146,7 +146,6 @@ class KotlinLanguageServer(SolidLanguageServer):
                 version_output = result.stderr
 
                 # Parse version from output like 'openjdk version "21.0.1"' or 'java version "1.8.0_202"'
-                import re
                 version_match = re.search(r'version\s+"(\d+)\.?(\d+)?', version_output)
 
                 if version_match:
@@ -155,11 +154,11 @@ class KotlinLanguageServer(SolidLanguageServer):
                     if major_version == 1 and version_match.group(2):
                         major_version = int(version_match.group(2))
 
-                    if major_version >= JAVA_VERSION:
-                        log.info(f"Found Java {major_version} in PATH (required: {JAVA_VERSION})")
+                    if major_version >= MIN_JAVA_VERSION:
+                        log.info(f"Found Java {major_version} in PATH (required: {MIN_JAVA_VERSION})")
                         return True
                     else:
-                        log.info(f"Found Java {major_version} in PATH, but version {JAVA_VERSION} is required")
+                        log.info(f"Found Java {major_version} in PATH, but version {MIN_JAVA_VERSION} is required")
                         return False
                 else:
                     log.warning("Could not parse Java version from output")
@@ -198,7 +197,7 @@ class KotlinLanguageServer(SolidLanguageServer):
             java_path = os.path.join(java_dir, java_dependency["java_path"])
 
             if not os.path.exists(java_path):
-                log.info(f"Downloading Java {JAVA_VERSION} for {platform_id.value}...")
+                log.info(f"Downloading Java {MIN_JAVA_VERSION} for {platform_id.value}...")
                 FileUtils.download_and_extract_archive(java_dependency["url"], java_dir, java_dependency["archiveType"])
                 if not platform_id.value.startswith("win-"):
                     os.chmod(java_path, 0o755)
@@ -231,6 +230,7 @@ class KotlinLanguageServer(SolidLanguageServer):
             kotlin_script_name = "kotlin-lsp.cmd" if platform_id.value.startswith("win-") else "kotlin-lsp.sh"
 
             if shutil.which(kotlin_script_name):
+                log.info(f"Found Kotlin {kotlin_script_name} in PATH. Using it instead of bundled version.")
                 return kotlin_script_name
 
             kotlin_script = os.path.join(static_dir, kotlin_script_name)
