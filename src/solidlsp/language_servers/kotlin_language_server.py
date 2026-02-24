@@ -57,7 +57,7 @@ PLATFORM_KOTLIN_SUFFIX = {
 }
 
 # Java runtime dependency information per platform
-MIN_JAVA_VERSION=21
+MIN_JAVA_VERSION = 21
 
 JAVA_DEPENDENCIES = {
     "win-x64": {
@@ -132,15 +132,11 @@ class KotlinLanguageServer(SolidLanguageServer):
 
             Returns:
                 Resolved path to java executable if available with version >= MIN_JAVA_VERSION, None otherwise.
+
             """
             try:
                 # Run 'java -version' to check if Java is available
-                result = subprocess.run(
-                    ["java", "-version"],
-                    capture_output=True,
-                    text=True,
-                    timeout=5
-                )
+                result = subprocess.run(["java", "-version"], check=False, capture_output=True, text=True, timeout=5)
 
                 # Java outputs version to stderr
                 version_output = result.stderr
@@ -181,6 +177,7 @@ class KotlinLanguageServer(SolidLanguageServer):
 
             Returns:
                 Path to the Java executable
+
             """
             # First check if Java is available in PATH
             if java_path := self._check_java_version_in_path():
