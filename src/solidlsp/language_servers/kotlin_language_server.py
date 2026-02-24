@@ -126,12 +126,12 @@ class KotlinLanguageServer(SolidLanguageServer):
             super().__init__(custom_settings, ls_resources_dir)
             self._java_home_path: str | None = None
 
-        def _check_java_version_in_path(self) -> bool:
+        def _check_java_version_in_path(self) -> str | None:
             """
             Check if Java is available in PATH with the minimum required version.
 
             Returns:
-                True if Java is available with version >= JAVA_VERSION, False otherwise.
+                Resolved path to java executable if available with version >= MIN_JAVA_VERSION, None otherwise.
             """
             try:
                 # Run 'java -version' to check if Java is available
@@ -156,17 +156,18 @@ class KotlinLanguageServer(SolidLanguageServer):
 
                     if major_version >= MIN_JAVA_VERSION:
                         log.info(f"Found Java {major_version} in PATH (required: {MIN_JAVA_VERSION})")
-                        return True
+                        java_path = shutil.which("java")
+                        return os.path.realpath(java_path) if java_path else None
                     else:
                         log.info(f"Found Java {major_version} in PATH, but version {MIN_JAVA_VERSION} is required")
-                        return False
+                        return None
                 else:
                     log.warning("Could not parse Java version from output")
-                    return False
+                    return None
 
             except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError) as e:
                 log.debug(f"Java not found in PATH or failed to check version: {e}")
-                return False
+                return None
 
         def _setup_java_dependency(self, static_dir: str, platform_id) -> str:
             """
@@ -182,9 +183,15 @@ class KotlinLanguageServer(SolidLanguageServer):
                 Path to the Java executable
             """
             # First check if Java is available in PATH
-            if self._check_java_version_in_path():
+            if java_path := self._check_java_version_in_path():
                 log.info("Using Java from PATH")
-                # Return 'java' to use from PATH (JAVA_HOME will not be set)
+
+                # Set JAVA_HOME if not already set: typical structure is JAVA_HOME/bin/java
+                if java_home := os.environ.get("JAVA_HOME"):
+                    self._java_home_path = java_home
+                else:
+                    self._java_home_path = os.path.dirname(os.path.dirname(java_path))
+
                 return "java"
 
             # Java not available or version too old - download bundled version
@@ -260,7 +267,7 @@ class KotlinLanguageServer(SolidLanguageServer):
             """Provides JAVA_HOME and JVM options for the Kotlin Language Server process."""
             env: dict[str, str] = {}
 
-            # Only set JAVA_HOME if using bundled Java (not from PATH)
+            # Set JAVA_HOME if determined (from bundled Java or detected from PATH via heuristics)
             if self._java_home_path is not None:
                 env["JAVA_HOME"] = self._java_home_path
 
