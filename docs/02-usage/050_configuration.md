@@ -206,7 +206,7 @@ instead of Serena's managed installation, you can set the `ls_path` setting as f
 ```yaml
 ls_specific_settings:
   <language>:
-    ls_path: ["/path/to/language-server"]
+    ls_path: "/path/to/language-server"
 ```
 
 This is supported by all language servers deriving their dependency provider from  `LanguageServerDependencyProviderSinglePath`.
