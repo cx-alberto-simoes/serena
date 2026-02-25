@@ -54,6 +54,7 @@ PLATFORM_KOTLIN_SUFFIX = {
     "osx-arm64": "mac-aarch64",
 }
 
+
 class KotlinLanguageServer(SolidLanguageServer):
     """
     Provides Kotlin specific instantiation of the LanguageServer class. Contains various configurations and settings specific to Kotlin.
