@@ -140,7 +140,6 @@ class KotlinLanguageServer(SolidLanguageServer):
             """Provides JAVA_HOME and JVM options for the Kotlin Language Server process."""
             env: dict[str, str] = {}
 
-            # Set JAVA_HOME if determined (from bundled Java or detected from PATH via heuristics)
             if self._java_home_path is not None:
                 env["JAVA_HOME"] = self._java_home_path
 
