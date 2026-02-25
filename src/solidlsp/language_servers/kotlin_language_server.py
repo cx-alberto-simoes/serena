@@ -19,7 +19,6 @@ Example configuration for large projects:
 import logging
 import os
 import pathlib
-import shutil
 import stat
 import threading
 from typing import cast
@@ -108,11 +107,6 @@ class KotlinLanguageServer(SolidLanguageServer):
 
             # Setup Kotlin Language Server
             kotlin_script_name = "kotlin-lsp.cmd" if platform_id.value.startswith("win-") else "kotlin-lsp.sh"
-
-            if shutil.which(kotlin_script_name):
-                log.info(f"Found Kotlin {kotlin_script_name} in PATH. Using it instead of bundled version.")
-                return kotlin_script_name
-
             kotlin_script = os.path.join(static_dir, kotlin_script_name)
 
             if not os.path.exists(kotlin_script):
